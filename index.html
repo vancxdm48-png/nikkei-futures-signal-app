@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nikkei 225 Futures 売買判断支援</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      --bg: #071018;
+      --panel: #0d1822;
+      --panel-2: #101f2a;
+      --line: #253747;
+      --text: #eef7fb;
+      --muted: #9eb2bf;
+      --cyan: #26d7ff;
+      --pink: #ff4b88;
+      --green: #36d399;
+      --amber: #f7c948;
+      --red: #ff6370;
+      --blue: #7aa7ff;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .26);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 84% 8%, rgba(38, 215, 255, .12), transparent 30%),
+        radial-gradient(circle at 10% 30%, rgba(255, 75, 136, .11), transparent 28%),
+        linear-gradient(160deg, #061019 0%, #0a121a 45%, #071018 100%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    .app {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 0 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 38px);
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .date-badge {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 14px;
+      border: 1px solid var(--line);
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: rgba(13, 24, 34, .82);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #dff8ff;
+      border: 1px solid rgba(38, 215, 255, .42);
+      background: rgba(38, 215, 255, .08);
+      padding: 10px 12px;
+      border-radius: 6px;
+      white-space: nowrap;
+      box-shadow: var(--shadow);
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 16px var(--cyan);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: rgba(13, 24, 34, .92);
+      border: 1px solid rgba(142, 171, 188, .18);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .controls {
+      position: sticky;
+      top: 14px;
+      padding: 14px;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-size: 16px;
+      font-weight: 800;
+      color: #ffffff;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .primary-input input {
+      min-height: 48px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid #2a4052;
+      border-radius: 6px;
+      background: #07131d;
+      color: var(--text);
+      padding: 9px 10px;
+      outline: none;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(38, 215, 255, .12);
+    }
+
+    textarea {
+      min-height: 118px;
+      resize: vertical;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 12px 0 16px;
+    }
+
+    .btn {
+      min-height: 42px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--text);
+      background: #132636;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, #0ba7c7, #1d6bff);
+      color: #fff;
+    }
+
+    .btn.secondary {
+      border-color: #345062;
+      background: #0b1823;
+    }
+
+    .btn:hover { filter: brightness(1.08); }
+
+    .btn.full {
+      width: 100%;
+      margin-top: 2px;
+    }
+
+    .live-status {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      border: 1px solid rgba(142, 171, 188, .18);
+      background: rgba(4, 12, 18, .52);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-top: 8px;
+    }
+
+    .live-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+
+    .live-status.on::before {
+      background: var(--green);
+      box-shadow: 0 0 12px var(--green);
+    }
+
+    .live-status.error::before {
+      background: var(--red);
+      box-shadow: 0 0 12px var(--red);
+    }
+
+    .tv-fallback {
+      height: 100%;
+      min-height: 440px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+      line-height: 1.6;
+      background: #050d14;
+    }
+
+    .risk-box {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 4px;
+    }
+
+    .advanced {
+      border-top: 1px solid var(--line);
+      margin-top: 14px;
+      padding-top: 12px;
+    }
+
+    .advanced summary {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 800;
+      list-style: none;
+    }
+
+    .advanced summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .advanced summary::after {
+      content: "開く";
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .advanced[open] summary::after {
+      content: "閉じる";
+    }
+
+    .advanced-body {
+      padding-top: 10px;
+    }
+
+    .main {
+      display: grid;
+      gap: 16px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr .9fr .9fr;
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      min-height: 102px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .metric .value {
+      font-size: clamp(25px, 3vw, 39px);
+      line-height: 1;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .metric .sub {
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .signal {
+      border-left: 4px solid var(--amber);
+    }
+
+    .signal.buy { border-left-color: var(--green); }
+    .signal.sell { border-left-color: var(--pink); }
+    .signal.wait { border-left-color: var(--amber); }
+
+    .chart-panel {
+      padding: 14px;
+    }
+
+    .live-panel {
+      padding: 14px;
+    }
+
+    .live-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .live-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      text-align: right;
+    }
+
+    .tv-wrap {
+      width: 100%;
+      min-height: 440px;
+      border: 1px solid #1e3240;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #050d14;
+    }
+
+    #tradingviewWidget {
+      width: 100%;
+      height: 440px;
+    }
+
+    #tradingviewWidget iframe {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .chart-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      justify-content: flex-end;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+    }
+
+    .key {
+      width: 18px;
+      height: 3px;
+      border-radius: 2px;
+      display: inline-block;
+      background: var(--cyan);
+    }
+
+    .key.ma20 { background: var(--amber); }
+    .key.ma75 { background: var(--blue); }
+    .key.fib { background: #b88cff; }
+    .key.buy { background: var(--green); }
+    .key.sell { background: var(--pink); }
+
+    .canvas-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 8.2;
+      min-height: 360px;
+      overflow: hidden;
+      border-radius: 8px;
+      background: #050d14;
+      border: 1px solid #1e3240;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .decision {
+      padding: 14px;
+      min-height: 190px;
+    }
+
+    .decision h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .decision .price {
+      font-size: 25px;
+      font-weight: 850;
+      margin-bottom: 8px;
+    }
+
+    .decision p {
+      margin: 8px 0 0;
+      color: #d6e4ec;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .buy-text { color: var(--green); }
+    .sell-text { color: var(--pink); }
+    .wait-text { color: var(--amber); }
+
+    .tables {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(142, 171, 188, .14);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    th {
+      color: #ffffff;
+      background: #102332;
+      font-size: 12px;
+    }
+
+    td { color: #dbe9ef; }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .table-panel {
+      padding: 14px;
+    }
+
+    .notice {
+      padding: 12px 14px;
+      color: #d8e6ed;
+      background: rgba(247, 201, 72, .08);
+      border: 1px solid rgba(247, 201, 72, .26);
+      border-radius: 8px;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+
+    .mobile-tabs {
+      display: none;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      min-height: 36px;
+      border: 1px solid #2b4658;
+      background: #0b1823;
+      color: var(--muted);
+      border-radius: 6px;
+    }
+
+    .tab.active {
+      color: #fff;
+      border-color: var(--cyan);
+      background: rgba(38, 215, 255, .12);
+    }
+
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .controls { position: static; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      .tables { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 740px) {
+      .app { padding: 12px; }
+      .topbar { grid-template-columns: 1fr; }
+      .brand { display: grid; gap: 8px; }
+      .status-pill { justify-content: center; }
+      .field-grid { grid-template-columns: 1fr; }
+      .summary, .decision-grid { grid-template-columns: 1fr; }
+      .canvas-wrap { min-height: 420px; aspect-ratio: 9 / 11; }
+      .chart-head { grid-template-columns: 1fr; }
+      .live-head { grid-template-columns: 1fr; }
+      .live-note { text-align: left; }
+      .tv-wrap { min-height: 360px; }
+      #tradingviewWidget { height: 360px; }
+      .tv-fallback { min-height: 360px; }
+      .legend { justify-content: flex-start; }
+      .metric .value { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Nikkei 225 Futures 売買判断支援</h1>
+        <div class="date-badge" id="todayLabel">2026-07-03</div>
+      </div>
+      <div class="status-pill"><span class="dot"></span><span id="marketState">判定待ち</span></div>
+    </header>
+
+    <div class="layout">
+      <aside class="panel controls">
+        <h2 class="section-title">入力</h2>
+        <div class="field primary-input">
+          <label for="current">現在値</label>
+          <input id="current" type="number" value="70710" step="10" />
+        </div>
+
+        <div class="field-grid">
+          <div class="field">
+            <label for="high">直近高値</label>
+            <input id="high" type="number" value="72000" step="10" />
+          </div>
+          <div class="field">
+            <label for="low">直近安値</label>
+            <input id="low" type="number" value="70000" step="10" />
+          </div>
+          <div class="field">
+            <label for="resistance">上値抵抗</label>
+            <input id="resistance" type="number" value="71000" step="10" />
+          </div>
+          <div class="field">
+            <label for="support">下値支持</label>
+            <input id="support" type="number" value="70500" step="10" />
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button class="btn primary" id="recalc">再計算</button>
+          <button class="btn secondary" id="reloadTv">チャート再読込</button>
+        </div>
+
+        <div class="risk-box">
+          <h2 class="section-title">チャート表</h2>
+          <div class="field">
+            <label for="tvSymbol">銘柄</label>
+            <select id="tvSymbol">
+              <option value="OSE:NK2251!" selected>Nikkei 225 Futures</option>
+              <option value="OSE:NK225-1">OSE NK225-1</option>
+            </select>
+          </div>
+          <div class="live-status" id="liveStatus">Nikkei 225 Futures 60分足を表示します。</div>
+        </div>
+
+        <details class="advanced">
+          <summary>詳細設定</summary>
+          <div class="advanced-body">
+            <div class="field-grid">
+              <div class="field">
+                <label for="trend">地合い</label>
+                <select id="trend">
+                  <option value="up">上昇</option>
+                  <option value="range" selected>横ばい</option>
+                  <option value="down">下降</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="atr">想定値幅</label>
+                <input id="atr" type="number" value="450" step="10" />
+              </div>
+              <div class="field">
+                <label for="rsi">RSI</label>
+                <input id="rsi" type="number" value="48" step="1" min="1" max="99" />
+              </div>
+              <div class="field">
+                <label for="account">口座資金</label>
+                <input id="account" type="number" value="1000000" step="10000" />
+              </div>
+              <div class="field">
+                <label for="riskPct">許容損失%</label>
+                <input id="riskPct" type="number" value="1" step="0.1" />
+              </div>
+              <div class="field">
+                <label for="contract">銘柄</label>
+                <select id="contract">
+                  <option value="micro" selected>マイクロ</option>
+                  <option value="mini">ミニ</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="stopWidth">損切り幅</label>
+              <input id="stopWidth" type="number" value="350" step="10" />
+            </div>
+            <div class="field">
+              <label for="ohlc">CSV貼り付け</label>
+              <textarea id="ohlc" spellcheck="false" placeholder="時刻,始値,高値,安値,終値"></textarea>
+            </div>
+            <div class="button-row">
+              <button class="btn secondary" id="sample">サンプル更新</button>
+              <button class="btn secondary" id="applyCsv">CSV反映</button>
+            </div>
+          </div>
+        </details>
+      </aside>
+
+      <main class="main">
+        <section class="panel live-panel">
+          <div class="live-head">
+            <h2 class="section-title">Nikkei 225 Futures 60分足</h2>
+            <div class="live-note">TradingView表示は取引所・契約によりリアルタイムまたは遅延です。</div>
+          </div>
+          <div class="tv-wrap">
+            <div id="tradingviewWidget"></div>
+          </div>
+        </section>
+
+        <section class="summary">
+          <div class="panel metric signal" id="signalCard">
+            <div class="label">総合判定</div>
+            <div class="value" id="mainSignal">計算中</div>
+            <div class="sub" id="mainReason">入力値から判定します。</div>
+          </div>
+          <div class="panel metric">
+            <div class="label">買い検討</div>
+            <div class="value buy-text" id="buyZoneTop">-</div>
+            <div class="sub" id="buyZoneSub">反発確認が前提</div>
+          </div>
+          <div class="panel metric">
+            <div class="label">売り検討</div>
+            <div class="value sell-text" id="sellZoneTop">-</div>
+            <div class="sub" id="sellZoneSub">失速確認が前提</div>
+          </div>
+          <div class="panel metric">
+            <div class="label">推奨枚数目安</div>
+            <div class="value" id="sizeValue">-</div>
+            <div class="sub" id="sizeSub">損失許容から計算</div>
+          </div>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="chart-head">
+            <h2 class="section-title">ローソク足</h2>
+            <div class="legend">
+              <span><i class="key buy"></i>買いゾーン</span>
+              <span><i class="key sell"></i>売りゾーン</span>
+              <span><i class="key ma20"></i>MA20</span>
+              <span><i class="key ma75"></i>MA75</span>
+              <span><i class="key fib"></i>フィボ</span>
+            </div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="chart"></canvas>
+          </div>
+        </section>
+
+        <section class="decision-grid">
+          <div class="panel decision">
+            <h3 class="buy-text">買った方がいい場所</h3>
+            <div class="price" id="buyDecisionPrice">-</div>
+            <p id="buyDecisionText">-</p>
+          </div>
+          <div class="panel decision">
+            <h3 class="sell-text">売った方がいい場所</h3>
+            <div class="price" id="sellDecisionPrice">-</div>
+            <p id="sellDecisionText">-</p>
+          </div>
+          <div class="panel decision">
+            <h3 class="wait-text">買わない・売らない場所</h3>
+            <div class="price" id="waitDecisionPrice">-</div>
+            <p id="waitDecisionText">-</p>
+          </div>
+        </section>
+
+        <section class="tables">
+          <div class="panel table-panel">
+            <h2 class="section-title">価格帯別アクション</h2>
+            <table>
+              <thead>
+                <tr><th>価格帯</th><th>判断</th><th>条件</th></tr>
+              </thead>
+              <tbody id="actionRows"></tbody>
+            </table>
+          </div>
+          <div class="panel table-panel">
+            <h2 class="section-title">重要ライン</h2>
+            <table>
+              <thead>
+                <tr><th>ライン</th><th>価格</th><th>意味</th></tr>
+              </thead>
+              <tbody id="lineRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="notice">
+          このツールは売買判断の補助です。TradingViewの表示はデータ提供条件によりリアルタイムまたは遅延になります。実際の注文前に、現在値、板、出来高、ニュース、為替、米国株、損切り幅を必ず確認してください。
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => Math.round(n).toLocaleString("ja-JP");
+    const yen = (n) => `${fmt(n)}円`;
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    let candles = [];
+    let seed = 7;
+
+    function readInputs() {
+      const current = Number($("current").value) || 0;
+      const high = Number($("high").value) || current + 1000;
+      const low = Number($("low").value) || current - 1000;
+      return {
+        current,
+        high: Math.max(high, low + 10),
+        low: Math.min(low, high - 10),
+        resistance: Number($("resistance").value) || current + 300,
+        support: Number($("support").value) || current - 300,
+        atr: Math.max(50, Number($("atr").value) || 450),
+        rsi: clamp(Number($("rsi").value) || 50, 1, 99),
+        trend: $("trend").value,
+        account: Math.max(1, Number($("account").value) || 1000000),
+        riskPct: clamp(Number($("riskPct").value) || 1, .1, 10),
+        stopWidth: Math.max(10, Number($("stopWidth").value) || 350),
+        contract: $("contract").value
+      };
+    }
+
+    function pseudoRand() {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    }
+
+    function generateCandles(input) {
+      const count = 86;
+      const result = [];
+      const drift = input.trend === "up" ? 18 : input.trend === "down" ? -18 : 0;
+      let close = input.current - drift * count * .55 + (input.trend === "up" ? -540 : input.trend === "down" ? 540 : -80);
+      for (let i = 0; i < count; i++) {
+        const wave = Math.sin(i / 5.2) * input.atr * .22;
+        const noise = (pseudoRand() - .5) * input.atr * .48;
+        const open = close;
+        close = open + drift + wave * .13 + noise;
+        const high = Math.max(open, close) + pseudoRand() * input.atr * .36 + 40;
+        const low = Math.min(open, close) - pseudoRand() * input.atr * .36 - 40;
+        result.push({ time: i, open, high, low, close });
+      }
+      const last = result[result.length - 1];
+      last.close = input.current;
+      last.high = Math.max(last.open, last.close) + input.atr * .28;
+      last.low = Math.min(last.open, last.close) - input.atr * .24;
+      return result;
+    }
+
+    function parseCsv(text) {
+      const rows = text.trim().split(/\n+/).map((line, i) => {
+        const parts = line.split(",").map((p) => p.trim());
+        const nums = parts.slice(-4).map(Number);
+        if (nums.some((n) => !Number.isFinite(n))) return null;
+        return { time: parts[0] || i, open: nums[0], high: nums[1], low: nums[2], close: nums[3] };
+      }).filter(Boolean);
+      return rows.length >= 8 ? rows : null;
+    }
+
+    function movingAverage(data, period) {
+      return data.map((_, i) => {
+        const start = Math.max(0, i - period + 1);
+        const slice = data.slice(start, i + 1);
+        return slice.reduce((sum, c) => sum + c.close, 0) / slice.length;
+      });
+    }
+
+    function levels(input) {
+      const range = input.high - input.low;
+      return {
+        fib236: input.high - range * .236,
+        fib382: input.high - range * .382,
+        fib500: input.high - range * .5,
+        fib618: input.high - range * .618,
+        buyLow: Math.min(input.support, input.high - range * .618) - input.atr * .10,
+        buyHigh: Math.min(input.support + input.atr * .35, input.high - range * .618 + input.atr * .10),
+        sellLow: Math.max(input.resistance - input.atr * .10, input.high - range * .5 + input.atr * .10),
+        sellHigh: Math.max(input.resistance, input.high - range * .382) + input.atr * .18
+      };
+    }
+
+    function evaluate(input, ma20, ma75) {
+      const l = levels(input);
+      const nearSupport = input.current <= l.buyHigh && input.current >= l.buyLow;
+      const nearResistance = input.current >= l.sellLow && input.current <= l.sellHigh;
+      const brokeSupport = input.current < input.support - input.atr * .18;
+      const brokeResistance = input.current > input.resistance + input.atr * .18;
+      const aboveMAs = input.current > ma20 && input.current > ma75;
+      const belowMAs = input.current < ma20 && input.current < ma75;
+      const overbought = input.rsi >= 68;
+      const oversold = input.rsi <= 32;
+      let signal = "様子見";
+      let kind = "wait";
+      let reason = "価格が中途半端な位置にあります。";
+
+      if ((nearSupport && input.rsi >= 34 && input.rsi <= 58 && !belowMAs) || (brokeResistance && aboveMAs && input.rsi < 72)) {
+        signal = "買い検討";
+        kind = "buy";
+        reason = nearSupport ? "支持帯で反発を確認する局面です。" : "抵抗突破後の押し戻し確認です。";
+      }
+
+      if ((nearResistance && input.rsi >= 52 && !aboveMAs) || (brokeSupport && belowMAs && input.rsi > 25)) {
+        signal = "売り検討";
+        kind = "sell";
+        reason = nearResistance ? "抵抗帯で失速を確認する局面です。" : "支持割れ後の戻り売りを確認する局面です。";
+      }
+
+      if (overbought && nearResistance) {
+        signal = "買い見送り";
+        kind = "wait";
+        reason = "抵抗帯に近く、RSIが過熱しています。";
+      }
+
+      if (oversold && nearSupport) {
+        signal = "売り見送り";
+        kind = "wait";
+        reason = "支持帯に近く、RSIが売られすぎです。";
+      }
+
+      return { signal, kind, reason, l, nearSupport, nearResistance, brokeSupport, brokeResistance, aboveMAs, belowMAs };
+    }
+
+    function updateText(input, analysis, ma20, ma75) {
+      const l = analysis.l;
+      const riskYen = input.account * input.riskPct / 100;
+      const multiplier = input.contract === "micro" ? 10 : 100;
+      const maxQty = Math.max(0, Math.floor(riskYen / (input.stopWidth * multiplier)));
+      const contractName = input.contract === "micro" ? "マイクロ" : "ミニ";
+
+      $("marketState").textContent = `${yen(input.current)} / ${analysis.signal}`;
+      $("mainSignal").textContent = analysis.signal;
+      $("mainReason").textContent = analysis.reason;
+      $("signalCard").className = `panel metric signal ${analysis.kind}`;
+
+      $("buyZoneTop").textContent = `${fmt(l.buyLow)}-${fmt(l.buyHigh)}`;
+      $("buyZoneSub").textContent = `損切り候補 ${yen(l.buyLow - input.stopWidth * .55)}`;
+      $("sellZoneTop").textContent = `${fmt(l.sellLow)}-${fmt(l.sellHigh)}`;
+      $("sellZoneSub").textContent = `損切り候補 ${yen(l.sellHigh + input.stopWidth * .55)}`;
+      $("sizeValue").textContent = `${maxQty}枚`;
+      $("sizeSub").textContent = `${contractName} / 許容損失 ${fmt(riskYen)}円`;
+
+      $("buyDecisionPrice").textContent = `${yen(l.buyLow)}〜${yen(l.buyHigh)}`;
+      $("buyDecisionText").textContent =
+        `支持線、フィボ50-61.8%付近、MA75上を維持する反発で検討。現在値が抵抗に近い場合は追いかけ買いを避ける。`;
+      $("sellDecisionPrice").textContent = `${yen(l.sellLow)}〜${yen(l.sellHigh)}`;
+      $("sellDecisionText").textContent =
+        `抵抗線、フィボ23.6%付近、MA20下への失速で検討。支持線直上やRSI低下時の突っ込み売りは避ける。`;
+      $("waitDecisionPrice").textContent = `${yen(l.buyHigh + 1)}〜${yen(l.sellLow - 1)}`;
+      $("waitDecisionText").textContent =
+        `支持と抵抗の中間、指標発表前、損切り幅が広すぎる場面は見送り。方向が出てから入る。`;
+
+      const actionRows = [
+        [`${yen(input.resistance + input.atr * .2)}以上`, "買いは慎重", "上抜け後の押し戻しを待つ。高値掴みを避ける。"],
+        [`${yen(l.sellLow)}〜${yen(l.sellHigh)}`, "売り検討", "上ヒゲ、陰線転換、MA20下回りが条件。"],
+        [`${yen(l.buyHigh + 1)}〜${yen(l.sellLow - 1)}`, "見送り", "中間地帯。損切り根拠が作りにくい。"],
+        [`${yen(l.buyLow)}〜${yen(l.buyHigh)}`, "買い検討", "下ヒゲ、陽線転換、MA75維持が条件。"],
+        [`${yen(input.support - input.atr * .2)}以下`, "売りは慎重", "突っ込み売りを避け、戻りを待つ。"]
+      ];
+      $("actionRows").innerHTML = actionRows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+
+      const lineRows = [
+        ["現在値", yen(input.current), "ここから上か下かを判定する基準"],
+        ["上値抵抗", yen(input.resistance), "売り圧力や利確が出やすい価格帯"],
+        ["下値支持", yen(input.support), "買い支えや反発を確認する価格帯"],
+        ["Fib 38.2%", yen(l.fib382), "強い相場の浅い押し目候補"],
+        ["Fib 50.0%", yen(l.fib500), "中立の押し目候補"],
+        ["Fib 61.8%", yen(l.fib618), "深い押し目候補"],
+        ["MA20", yen(ma20), "短期の流れ"],
+        ["MA75", yen(ma75), "中期の流れ"]
+      ];
+      $("lineRows").innerHTML = lineRows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+    }
+
+    function drawChart(input, analysis, ma20Arr, ma75Arr) {
+      const canvas = $("chart");
+      const wrap = canvas.parentElement;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = wrap.getBoundingClientRect();
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      const w = rect.width;
+      const h = rect.height;
+      const pad = { l: 58, r: 76, t: 28, b: 36 };
+      const areaW = w - pad.l - pad.r;
+      const areaH = h - pad.t - pad.b;
+      const l = analysis.l;
+      const prices = candles.flatMap((c) => [c.high, c.low]).concat([
+        input.high, input.low, input.resistance, input.support, l.buyLow, l.buyHigh, l.sellLow, l.sellHigh
+      ]);
+      const min = Math.min(...prices) - input.atr * .35;
+      const max = Math.max(...prices) + input.atr * .35;
+      const y = (p) => pad.t + (max - p) / (max - min) * areaH;
+      const x = (i) => pad.l + i / Math.max(1, candles.length - 1) * areaW;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#050d14";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = "rgba(142,171,188,.16)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 6; i++) {
+        const yy = pad.t + areaH * i / 6;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, yy);
+        ctx.lineTo(w - pad.r, yy);
+        ctx.stroke();
+        const price = max - (max - min) * i / 6;
+        ctx.fillStyle = "#8fa4b2";
+        ctx.font = "12px -apple-system, sans-serif";
+        ctx.fillText(fmt(price), w - pad.r + 12, yy + 4);
+      }
+      for (let i = 0; i <= 8; i++) {
+        const xx = pad.l + areaW * i / 8;
+        ctx.beginPath();
+        ctx.moveTo(xx, pad.t);
+        ctx.lineTo(xx, h - pad.b);
+        ctx.stroke();
+      }
+
+      function zone(y1, y2, color) {
+        const top = Math.min(y(y1), y(y2));
+        const height = Math.abs(y(y1) - y(y2));
+        ctx.fillStyle = color;
+        ctx.fillRect(pad.l, top, areaW, Math.max(2, height));
+      }
+      zone(l.buyLow, l.buyHigh, "rgba(54,211,153,.13)");
+      zone(l.sellLow, l.sellHigh, "rgba(255,75,136,.13)");
+
+      function line(price, color, label, dash = []) {
+        const yy = y(price);
+        ctx.save();
+        ctx.setLineDash(dash);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, yy);
+        ctx.lineTo(w - pad.r, yy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = "12px -apple-system, sans-serif";
+        ctx.fillText(label, pad.l + 8, yy - 6);
+        ctx.restore();
+      }
+      line(input.resistance, "#ff4b88", "抵抗", [5, 4]);
+      line(input.support, "#36d399", "支持", [5, 4]);
+      line(input.current, "#ffffff", "現在値");
+      line(analysis.l.fib382, "#b88cff", "38.2%", [3, 4]);
+      line(analysis.l.fib500, "#b88cff", "50.0%", [3, 4]);
+      line(analysis.l.fib618, "#b88cff", "61.8%", [3, 4]);
+
+      const candleW = clamp(areaW / candles.length * .62, 3, 10);
+      candles.forEach((c, i) => {
+        const xx = x(i);
+        const up = c.close >= c.open;
+        const color = up ? "#26d7ff" : "#ff4b88";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(xx, y(c.high));
+        ctx.lineTo(xx, y(c.low));
+        ctx.stroke();
+        const bodyY = Math.min(y(c.open), y(c.close));
+        const bodyH = Math.max(2, Math.abs(y(c.open) - y(c.close)));
+        ctx.fillStyle = color;
+        ctx.fillRect(xx - candleW / 2, bodyY, candleW, bodyH);
+      });
+
+      function maLine(arr, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        arr.forEach((v, i) => {
+          const xx = x(i);
+          const yy = y(v);
+          if (i === 0) ctx.moveTo(xx, yy);
+          else ctx.lineTo(xx, yy);
+        });
+        ctx.stroke();
+      }
+      maLine(ma20Arr, "#f7c948");
+      maLine(ma75Arr, "#7aa7ff");
+    }
+
+    function recalc(regen = false) {
+      const input = readInputs();
+      if (regen || !candles.length) candles = generateCandles(input);
+      else {
+        const last = candles[candles.length - 1];
+        last.close = input.current;
+        last.high = Math.max(last.high, input.current + input.atr * .18);
+        last.low = Math.min(last.low, input.current - input.atr * .18);
+      }
+      const ma20Arr = movingAverage(candles, 20);
+      const ma75Arr = movingAverage(candles, 75);
+      const ma20 = ma20Arr[ma20Arr.length - 1];
+      const ma75 = ma75Arr[ma75Arr.length - 1];
+      const analysis = evaluate(input, ma20, ma75);
+      updateText(input, analysis, ma20, ma75);
+      drawChart(input, analysis, ma20Arr, ma75Arr);
+    }
+
+    function setLiveStatus(text, kind = "") {
+      const el = $("liveStatus");
+      el.textContent = text;
+      el.className = `live-status ${kind}`;
+    }
+
+    function renderTradingView() {
+      const container = $("tradingviewWidget");
+      const symbol = ($("tvSymbol").value || "OSE:NK2251!").trim();
+      const label = $("tvSymbol").selectedOptions?.[0]?.textContent || "Nikkei 225 Futures";
+      container.innerHTML = "";
+
+      if (!window.TradingView || !window.TradingView.widget) {
+        container.innerHTML = `
+          <div class="tv-fallback">
+            <div>
+              TradingViewチャートを読み込めませんでした。<br>
+              ネット接続を確認してから「チャート再読込」を押してください。
+            </div>
+          </div>`;
+        setLiveStatus("TradingViewの読み込み待ちです。", "error");
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      new TradingView.widget({
+        autosize: false,
+        width: Math.max(320, Math.floor(rect.width)),
+        height: Math.max(320, Math.floor(rect.height)),
+        symbol,
+        interval: "60",
+        timezone: "Asia/Tokyo",
+        theme: "dark",
+        style: "1",
+        locale: "ja",
+        enable_publishing: false,
+        hide_top_toolbar: false,
+        hide_side_toolbar: false,
+        allow_symbol_change: true,
+        studies: ["MASimple@tv-basicstudies", "RSI@tv-basicstudies"],
+        container_id: "tradingviewWidget"
+      });
+
+      setLiveStatus(`${label} 60分足を表示中`, "on");
+    }
+
+    $("recalc").addEventListener("click", () => recalc(false));
+    $("sample").addEventListener("click", () => { seed += 11; recalc(true); });
+    $("reloadTv").addEventListener("click", renderTradingView);
+    $("tvSymbol").addEventListener("change", renderTradingView);
+    $("applyCsv").addEventListener("click", () => {
+      const parsed = parseCsv($("ohlc").value);
+      if (parsed) {
+        candles = parsed;
+        $("current").value = Math.round(parsed[parsed.length - 1].close);
+        recalc(false);
+      } else {
+        alert("CSVは最低8本以上、時刻,始値,高値,安値,終値 の形式で入れてください。");
+      }
+    });
+
+    ["current", "trend", "high", "low", "resistance", "support", "atr", "rsi", "account", "riskPct", "stopWidth", "contract"]
+      .forEach((id) => $(id).addEventListener("change", () => recalc(false)));
+
+    window.addEventListener("resize", () => recalc(false));
+    $("todayLabel").textContent = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    recalc(true);
+    setTimeout(renderTradingView, 200);
+  </script>
+</body>
+</html>
