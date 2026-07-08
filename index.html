@@ -6,7 +6,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Nikkei 225 Futures 売買判断支援</title>
-  <link rel="icon" href="data:," />
+  <meta name="description" content="日経225先物の売買判断を多要因スコアと信頼度・リスクリワードで支援するツール（投資助言ではありません）。" />
+  <meta name="theme-color" content="#071018" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta property="og:title" content="Nikkei 225 Futures 売買判断支援" />
+  <meta property="og:description" content="多要因スコア・信頼度・リスクリワードで日経225先物の売買判断を支援します。" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="icons/og-image.png" />
   <style>
     :root {
       --bg: #071018;
@@ -334,6 +343,73 @@
       font-size: 13px;
       line-height: 1.35;
     }
+
+    .conf-meter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .conf-bar {
+      flex: 1;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(142, 171, 188, .18);
+      overflow: hidden;
+    }
+
+    .conf-bar span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+      transition: width .5s ease;
+    }
+
+    .conf-num {
+      font-size: 13px;
+      font-weight: 800;
+      color: #dff8ff;
+      min-width: 42px;
+      text-align: right;
+    }
+
+    .score-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin: -4px 0 12px;
+    }
+
+    .score-tag {
+      font-weight: 800;
+      font-size: 14px;
+      color: #fff;
+      border: 1px solid var(--line);
+      background: #102332;
+      padding: 5px 10px;
+      border-radius: 6px;
+    }
+
+    .score-hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .contrib {
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .contrib.pos { color: var(--green); }
+    .contrib.neg { color: var(--pink); }
+    .contrib.zero { color: var(--muted); }
+
+    .plan-label { color: var(--muted); width: 40%; }
+    .plan-val { color: #eef7fb; font-weight: 700; }
 
     .signal {
       border-left: 4px solid var(--amber);
@@ -689,6 +765,10 @@
           <div class="panel metric signal" id="signalCard">
             <div class="label">総合判定</div>
             <div class="value" id="mainSignal">計算中</div>
+            <div class="conf-meter" title="判定の信頼度">
+              <div class="conf-bar"><span id="confFill"></span></div>
+              <span class="conf-num" id="confNum">-</span>
+            </div>
             <div class="sub" id="mainReason">入力値から判定します。</div>
           </div>
           <div class="panel metric">
@@ -739,6 +819,28 @@
             <h3 class="wait-text">買わない・売らない場所</h3>
             <div class="price" id="waitDecisionPrice">-</div>
             <p id="waitDecisionText">-</p>
+          </div>
+        </section>
+
+        <section class="tables reason-tables">
+          <div class="panel table-panel">
+            <h2 class="section-title">判定の根拠（スコア内訳）</h2>
+            <div class="score-head">
+              <span class="score-tag" id="scoreTag">スコア -</span>
+              <span class="score-hint">＋は買い方向 / −は売り方向</span>
+            </div>
+            <table>
+              <thead>
+                <tr><th>要因</th><th>寄与</th><th>内容</th></tr>
+              </thead>
+              <tbody id="factorRows"></tbody>
+            </table>
+          </div>
+          <div class="panel table-panel">
+            <h2 class="section-title">トレードプラン</h2>
+            <table>
+              <tbody id="planRows"></tbody>
+            </table>
           </div>
         </section>
 
@@ -858,45 +960,135 @@
       };
     }
 
-    function evaluate(input, ma20, ma75) {
+    function computeIndicators(data, ma20Arr, ma75Arr) {
+      const n = data.length;
+      const ma20 = ma20Arr[n - 1];
+      const ma75 = ma75Arr[n - 1];
+      const ma20Prev = ma20Arr[Math.max(0, n - 6)];
+      const ma20Slope = ma20 - ma20Prev;
+      const past = data[Math.max(0, n - 7)].close;
+      const momentum = data[n - 1].close - past;
+      return { ma20, ma75, ma20Slope, momentum };
+    }
+
+    // 買い方向(+)から見た短い根拠文を上位要因から作る
+    function factorReason(factors, side) {
+      const sign = side === "buy" ? 1 : -1;
+      const top = factors
+        .filter((f) => Math.sign(f.score) === sign)
+        .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+        .slice(0, 2);
+      return top.length ? top.map((f) => f.note).join(" ") : "複数の指標が同方向を支持しています。";
+    }
+
+    // エントリー・損切り・利確とリスクリワードを算出
+    function buildPlan(input, l, dir) {
+      if (dir === "buy") {
+        const entry = input.current;
+        const stop = entry - input.stopWidth;
+        let target = input.resistance > entry ? input.resistance
+          : l.sellLow > entry ? l.sellLow : input.high;
+        if (target <= entry) target = entry + input.atr * .8;
+        const risk = entry - stop;
+        const reward = target - entry;
+        return { dir, entry, stop, target, risk, reward, rr: risk > 0 ? reward / risk : 0 };
+      }
+      const entry = input.current;
+      const stop = entry + input.stopWidth;
+      let target = input.support < entry ? input.support
+        : l.buyHigh < entry ? l.buyHigh : input.low;
+      if (target >= entry) target = entry - input.atr * .8;
+      const risk = stop - entry;
+      const reward = entry - target;
+      return { dir, entry, stop, target, risk, reward, rr: risk > 0 ? reward / risk : 0 };
+    }
+
+    function evaluate(input, ind) {
       const l = levels(input);
+      const { ma20, ma75, ma20Slope, momentum } = ind;
       const nearSupport = input.current <= l.buyHigh && input.current >= l.buyLow;
       const nearResistance = input.current >= l.sellLow && input.current <= l.sellHigh;
       const brokeSupport = input.current < input.support - input.atr * .18;
       const brokeResistance = input.current > input.resistance + input.atr * .18;
       const aboveMAs = input.current > ma20 && input.current > ma75;
       const belowMAs = input.current < ma20 && input.current < ma75;
-      const overbought = input.rsi >= 68;
-      const oversold = input.rsi <= 32;
-      let signal = "様子見";
-      let kind = "wait";
-      let reason = "価格が中途半端な位置にあります。";
 
-      if ((nearSupport && input.rsi >= 34 && input.rsi <= 58 && !belowMAs) || (brokeResistance && aboveMAs && input.rsi < 72)) {
-        signal = "買い検討";
-        kind = "buy";
-        reason = nearSupport ? "支持帯で反発を確認する局面です。" : "抵抗突破後の押し戻し確認です。";
+      const factors = [];
+      const add = (label, score, note) => factors.push({ label, score, note });
+
+      // 地合い
+      if (input.trend === "up") add("地合い", 2, "上昇トレンド。押し目買いが優位。");
+      else if (input.trend === "down") add("地合い", -2, "下降トレンド。戻り売りが優位。");
+      else add("地合い", 0, "横ばい。レンジ内の逆張り中心。");
+
+      // 価格帯（支持・抵抗・ブレイク）
+      if (nearSupport) add("価格帯", 2.5, "支持帯に接近。反発を取りやすい位置。");
+      else if (nearResistance) add("価格帯", -2.5, "抵抗帯に接近。失速を取りやすい位置。");
+      else if (brokeResistance) add("価格帯", 1.5, "抵抗をブレイク。順張り買い方向。");
+      else if (brokeSupport) add("価格帯", -1.5, "支持を割り込み。順張り売り方向。");
+      else add("価格帯", 0, "支持と抵抗の中間でエッジが乏しい。");
+
+      // RSI（逆張り基調）
+      if (input.rsi <= 30) add("RSI", 2, `RSI ${input.rsi}。売られすぎで反発余地。`);
+      else if (input.rsi <= 45) add("RSI", 0.8, `RSI ${input.rsi}。やや売られ気味。`);
+      else if (input.rsi < 55) add("RSI", 0, `RSI ${input.rsi}。中立圏。`);
+      else if (input.rsi < 70) add("RSI", -0.8, `RSI ${input.rsi}。やや買われ気味。`);
+      else add("RSI", -2, `RSI ${input.rsi}。買われすぎで反落余地。`);
+
+      // 移動平均整合
+      if (aboveMAs) add("移動平均", 1.5, "現在値がMA20・MA75の上。上目線。");
+      else if (belowMAs) add("移動平均", -1.5, "現在値がMA20・MA75の下。下目線。");
+      else add("移動平均", 0, "MAを挟み方向感が乏しい。");
+
+      // モメンタム（MA傾き＋直近の値動き）
+      const momoSign = Math.sign(ma20Slope) + Math.sign(momentum);
+      if (momoSign > 0) add("モメンタム", 1, "短期の勢いは上向き。");
+      else if (momoSign < 0) add("モメンタム", -1, "短期の勢いは下向き。");
+      else add("モメンタム", 0, "勢いは拮抗。");
+
+      // フィボナッチ合流
+      const nearFibBuy = Math.abs(input.current - l.fib500) < input.atr * .2 || Math.abs(input.current - l.fib618) < input.atr * .2;
+      const nearFibSell = Math.abs(input.current - l.fib236) < input.atr * .2 || Math.abs(input.current - l.fib382) < input.atr * .2;
+      if (nearFibBuy && input.trend !== "down") add("フィボ", 1, "押し目(50-61.8%)候補に接近。");
+      else if (nearFibSell && input.trend !== "up") add("フィボ", -1, "戻り(23.6-38.2%)候補に接近。");
+      else add("フィボ", 0, "主要フィボからは距離がある。");
+
+      const score = factors.reduce((s, f) => s + f.score, 0);
+
+      let dir = "wait";
+      if (score >= 2.5) dir = "buy";
+      else if (score <= -2.5) dir = "sell";
+
+      const buyPlan = buildPlan(input, l, "buy");
+      const sellPlan = buildPlan(input, l, "sell");
+      let plan = dir === "buy" ? buyPlan : dir === "sell" ? sellPlan : null;
+
+      let signal, kind, reason;
+      if (dir === "buy") {
+        if (buyPlan.rr >= 1.0) { signal = "買い検討"; kind = "buy"; reason = factorReason(factors, "buy"); }
+        else { signal = "買い見送り"; kind = "wait"; reason = `買い方向だがRR ${buyPlan.rr.toFixed(2)}が基準(1.0)未満。利確幅に対し損切りが広い。`; }
+      } else if (dir === "sell") {
+        if (sellPlan.rr >= 1.0) { signal = "売り検討"; kind = "sell"; reason = factorReason(factors, "sell"); }
+        else { signal = "売り見送り"; kind = "wait"; reason = `売り方向だがRR ${sellPlan.rr.toFixed(2)}が基準(1.0)未満。`; }
+      } else {
+        signal = "様子見"; kind = "wait";
+        reason = "買い・売りの根拠が拮抗。方向が出るまで待機。";
+        plan = buyPlan.rr >= sellPlan.rr ? buyPlan : sellPlan;
       }
 
-      if ((nearResistance && input.rsi >= 52 && !aboveMAs) || (brokeSupport && belowMAs && input.rsi > 25)) {
-        signal = "売り検討";
-        kind = "sell";
-        reason = nearResistance ? "抵抗帯で失速を確認する局面です。" : "支持割れ後の戻り売りを確認する局面です。";
-      }
+      // 信頼度：スコアの強さ＋要因の一致度＋リスクリワード
+      const agree = factors.filter((f) => f.score !== 0 && Math.sign(f.score) === Math.sign(score)).length;
+      const active = factors.filter((f) => f.score !== 0).length || 1;
+      const agreeRatio = agree / active;
+      const rrBonus = plan ? Math.max(0, Math.min(1.5, plan.rr - 1)) * 8 : 0;
+      const confidence = kind === "wait"
+        ? clamp(Math.round(20 + Math.abs(score) * 4), 5, 55)
+        : clamp(Math.round(38 + Math.abs(score) * 5 + agreeRatio * 14 + rrBonus), 10, 95);
 
-      if (overbought && nearResistance) {
-        signal = "買い見送り";
-        kind = "wait";
-        reason = "抵抗帯に近く、RSIが過熱しています。";
-      }
-
-      if (oversold && nearSupport) {
-        signal = "売り見送り";
-        kind = "wait";
-        reason = "支持帯に近く、RSIが売られすぎです。";
-      }
-
-      return { signal, kind, reason, l, nearSupport, nearResistance, brokeSupport, brokeResistance, aboveMAs, belowMAs };
+      return {
+        signal, kind, reason, score, factors, confidence, plan, dir, l,
+        nearSupport, nearResistance, brokeSupport, brokeResistance, aboveMAs, belowMAs
+      };
     }
 
     function updateText(input, analysis, ma20, ma75) {
@@ -906,10 +1098,31 @@
       const maxQty = Math.max(0, Math.floor(riskYen / (input.stopWidth * multiplier)));
       const contractName = input.contract === "micro" ? "マイクロ" : "ミニ";
 
-      $("marketState").textContent = `${yen(input.current)} / ${analysis.signal}`;
+      $("marketState").textContent = `${yen(input.current)} / ${analysis.signal}（信頼度${analysis.confidence}%）`;
       $("mainSignal").textContent = analysis.signal;
       $("mainReason").textContent = analysis.reason;
       $("signalCard").className = `panel metric signal ${analysis.kind}`;
+      $("confFill").style.width = `${analysis.confidence}%`;
+      $("confNum").textContent = `${analysis.confidence}%`;
+
+      $("scoreTag").textContent = `スコア ${analysis.score > 0 ? "+" : ""}${analysis.score.toFixed(1)}`;
+      $("factorRows").innerHTML = analysis.factors.map((f) => {
+        const cls = f.score > 0 ? "pos" : f.score < 0 ? "neg" : "zero";
+        const val = `${f.score > 0 ? "+" : ""}${f.score}`;
+        return `<tr><td>${f.label}</td><td class="contrib ${cls}">${val}</td><td>${f.note}</td></tr>`;
+      }).join("");
+
+      const p = analysis.plan;
+      const dirName = p ? (p.dir === "buy" ? "買い" : "売り") : "-";
+      const planRows = p ? [
+        ["方向", `${dirName}${analysis.kind === "wait" ? "（現状は見送り）" : ""}`],
+        ["エントリー目安", yen(p.entry)],
+        ["損切り", `${yen(p.stop)}（${fmt(Math.abs(p.risk))}円幅）`],
+        ["利確目安", `${yen(p.target)}（${fmt(Math.abs(p.reward))}円幅）`],
+        ["リスクリワード", `${p.rr.toFixed(2)} : 1`],
+        ["判定の信頼度", `${analysis.confidence}%`]
+      ] : [["方向", "-"]];
+      $("planRows").innerHTML = planRows.map((r) => `<tr><td class="plan-label">${r[0]}</td><td class="plan-val">${r[1]}</td></tr>`).join("");
 
       $("buyZoneTop").textContent = `${fmt(l.buyLow)}-${fmt(l.buyHigh)}`;
       $("buyZoneSub").textContent = `損切り候補 ${yen(l.buyLow - input.stopWidth * .55)}`;
@@ -1074,10 +1287,9 @@
       }
       const ma20Arr = movingAverage(candles, 20);
       const ma75Arr = movingAverage(candles, 75);
-      const ma20 = ma20Arr[ma20Arr.length - 1];
-      const ma75 = ma75Arr[ma75Arr.length - 1];
-      const analysis = evaluate(input, ma20, ma75);
-      updateText(input, analysis, ma20, ma75);
+      const ind = computeIndicators(candles, ma20Arr, ma75Arr);
+      const analysis = evaluate(input, ind);
+      updateText(input, analysis, ind.ma20, ind.ma75);
       drawChart(input, analysis, ma20Arr, ma75Arr);
     }
 
