@@ -695,7 +695,22 @@
               <option value="OSE:NK225-1">OSE NK225-1</option>
             </select>
           </div>
-          <div class="live-status" id="liveStatus">Nikkei 225 Futures 60分足を表示します。</div>
+          <div class="field">
+            <label for="liveSource">ライブ価格ソース</label>
+            <select id="liveSource">
+              <option value="^N225" selected>日経225 指数（^N225）</option>
+              <option value="NIY=F">日経225先物（NIY=F）</option>
+            </select>
+          </div>
+          <div class="button-row">
+            <button class="btn primary" id="liveToggle">ライブ自動更新 開始</button>
+            <select id="liveInterval">
+              <option value="15">15秒毎</option>
+              <option value="30" selected>30秒毎</option>
+              <option value="60">60秒毎</option>
+            </select>
+          </div>
+          <div class="live-status" id="liveStatus">Nikkei 225 Futures 60分足を表示します。「ライブ自動更新」で実価格を取得します。</div>
         </div>
 
         <details class="advanced">
@@ -1299,6 +1314,109 @@
       el.className = `live-status ${kind}`;
     }
 
+    // ---- ライブ価格取得（静的サイト向け：CORSプロキシでフォールバック）----
+    let liveTimer = null;
+    let liveOn = false;
+    let liveBusy = false;
+
+    function computeRSI(data, period = 14) {
+      if (data.length < period + 1) return null;
+      let gains = 0, losses = 0;
+      for (let i = data.length - period; i < data.length; i++) {
+        const diff = data[i].close - data[i - 1].close;
+        if (diff >= 0) gains += diff; else losses -= diff;
+      }
+      const avgGain = gains / period;
+      const avgLoss = losses / period;
+      if (avgLoss === 0) return avgGain === 0 ? 50 : 99;
+      const rs = avgGain / avgLoss;
+      return clamp(Math.round(100 - 100 / (1 + rs)), 1, 99);
+    }
+
+    function parseYahoo(result) {
+      const ts = result.timestamp || [];
+      const q = result.indicators?.quote?.[0] || {};
+      const rows = [];
+      for (let i = 0; i < ts.length; i++) {
+        const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+        if ([o, h, l, c].some((v) => v == null || !Number.isFinite(v))) continue;
+        rows.push({ time: ts[i], open: o, high: h, low: l, close: c });
+      }
+      if (rows.length < 10) return null;
+      const price = result.meta?.regularMarketPrice ?? rows[rows.length - 1].close;
+      return { candles: rows.slice(-90), price };
+    }
+
+    async function fetchLive(symbol) {
+      const api = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=60m&range=1mo`;
+      const attempts = [
+        api,
+        `https://corsproxy.io/?url=${encodeURIComponent(api)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(api)}`,
+      ];
+      for (const url of attempts) {
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const result = json?.chart?.result?.[0];
+          if (!result) continue;
+          const parsed = parseYahoo(result);
+          if (parsed) return parsed;
+        } catch (_) {
+          // 次のプロキシへ
+        }
+      }
+      return null;
+    }
+
+    async function liveTick() {
+      if (liveBusy) return;
+      liveBusy = true;
+      const symbol = $("liveSource").value;
+      const label = $("liveSource").selectedOptions?.[0]?.textContent || symbol;
+      setLiveStatus(`ライブ取得中… (${label})`);
+      const data = await fetchLive(symbol);
+      liveBusy = false;
+      if (!data) {
+        setLiveStatus("ライブ価格を取得できませんでした。手動入力値で計算中です。", "error");
+        return;
+      }
+      candles = data.candles;
+      const highs = candles.map((c) => c.high);
+      const lows = candles.map((c) => c.low);
+      $("current").value = Math.round(data.price);
+      $("high").value = Math.round(Math.max(...highs));
+      $("low").value = Math.round(Math.min(...lows));
+      const rsi = computeRSI(candles, 14);
+      if (rsi != null) $("rsi").value = rsi;
+      recalc(false);
+      const now = new Date().toLocaleTimeString("ja-JP");
+      setLiveStatus(`ライブ更新 ${now}（${label} / 60分足・約15分遅延の場合あり）`, "on");
+    }
+
+    function stopLive() {
+      liveOn = false;
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      $("liveToggle").textContent = "ライブ自動更新 開始";
+      $("liveToggle").classList.remove("secondary");
+      $("liveToggle").classList.add("primary");
+    }
+
+    function startLive() {
+      liveOn = true;
+      $("liveToggle").textContent = "ライブ自動更新 停止";
+      $("liveToggle").classList.remove("primary");
+      $("liveToggle").classList.add("secondary");
+      liveTick();
+      const sec = Math.max(15, Number($("liveInterval").value) || 30);
+      liveTimer = setInterval(liveTick, sec * 1000);
+    }
+
+    function toggleLive() {
+      if (liveOn) stopLive(); else startLive();
+    }
+
     function renderTradingView() {
       const container = $("tradingviewWidget");
       const symbol = ($("tvSymbol").value || "OSE:NK2251!").trim();
@@ -1343,6 +1461,9 @@
     $("sample").addEventListener("click", () => { seed += 11; recalc(true); });
     $("reloadTv").addEventListener("click", renderTradingView);
     $("tvSymbol").addEventListener("change", renderTradingView);
+    $("liveToggle").addEventListener("click", toggleLive);
+    $("liveSource").addEventListener("change", () => { if (liveOn) liveTick(); });
+    $("liveInterval").addEventListener("change", () => { if (liveOn) { stopLive(); startLive(); } });
     $("applyCsv").addEventListener("click", () => {
       const parsed = parseCsv($("ohlc").value);
       if (parsed) {
