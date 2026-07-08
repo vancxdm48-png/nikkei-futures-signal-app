@@ -220,8 +220,36 @@
       margin-top: 2px;
     }
 
-    .live-status {
+    .quick-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .quick-steps button {
       min-height: 34px;
+      border: 1px solid #345062;
+      border-radius: 6px;
+      background: #0b1823;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .quick-steps button:hover { filter: brightness(1.1); }
+    .quick-steps button.up { color: var(--green); border-color: rgba(54, 211, 153, .35); }
+    .quick-steps button.down { color: var(--pink); border-color: rgba(255, 75, 136, .35); }
+
+    .free-note {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .live-status {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -660,6 +688,15 @@
         <div class="field primary-input">
           <label for="current">現在値</label>
           <input id="current" type="number" value="70710" step="10" />
+          <div class="quick-steps" aria-label="現在値クイック更新">
+            <button type="button" class="down" data-step="-100">-100</button>
+            <button type="button" class="down" data-step="-50">-50</button>
+            <button type="button" class="down" data-step="-10">-10</button>
+            <button type="button" class="up" data-step="10">+10</button>
+            <button type="button" class="up" data-step="50">+50</button>
+            <button type="button" class="up" data-step="100">+100</button>
+          </div>
+          <p class="free-note">TradingViewチャートの価格を見ながら、±ボタンで現在値を合わせてください（無料版は外部API未接続）。</p>
         </div>
 
         <div class="field-grid">
@@ -695,22 +732,15 @@
               <option value="OSE:NK225-1">OSE NK225-1</option>
             </select>
           </div>
-          <div class="field">
-            <label for="liveSource">ライブ価格ソース</label>
-            <select id="liveSource">
-              <option value="^N225" selected>日経225 指数（^N225）</option>
-              <option value="NIY=F">日経225先物（NIY=F）</option>
-            </select>
-          </div>
           <div class="button-row">
-            <button class="btn primary" id="liveToggle">ライブ自動更新 開始</button>
-            <select id="liveInterval">
+            <button class="btn primary" id="autoRecalcToggle">自動再計算 開始</button>
+            <select id="autoRecalcInterval">
               <option value="15">15秒毎</option>
               <option value="30" selected>30秒毎</option>
               <option value="60">60秒毎</option>
             </select>
           </div>
-          <div class="live-status" id="liveStatus">Nikkei 225 Futures 60分足を表示します。「ライブ自動更新」で実価格を取得します。</div>
+          <div class="live-status" id="liveStatus">無料版：外部APIには接続しません。TradingViewチャートを参照し、現在値を更新して判定します。</div>
         </div>
 
         <details class="advanced">
@@ -1302,6 +1332,8 @@
       }
       const ma20Arr = movingAverage(candles, 20);
       const ma75Arr = movingAverage(candles, 75);
+      const rsiLocal = computeRSI(candles, 14);
+      if (rsiLocal != null) $("rsi").value = rsiLocal;
       const ind = computeIndicators(candles, ma20Arr, ma75Arr);
       const analysis = evaluate(input, ind);
       updateText(input, analysis, ind.ma20, ind.ma75);
@@ -1314,10 +1346,9 @@
       el.className = `live-status ${kind}`;
     }
 
-    // ---- ライブ価格取得（静的サイト向け：CORSプロキシでフォールバック）----
-    let liveTimer = null;
-    let liveOn = false;
-    let liveBusy = false;
+    // ---- 無料版：外部APIなし。入力値の自動再計算とクイック更新 ----
+    let autoTimer = null;
+    let autoOn = false;
 
     function computeRSI(data, period = 14) {
       if (data.length < period + 1) return null;
@@ -1333,88 +1364,39 @@
       return clamp(Math.round(100 - 100 / (1 + rs)), 1, 99);
     }
 
-    function parseYahoo(result) {
-      const ts = result.timestamp || [];
-      const q = result.indicators?.quote?.[0] || {};
-      const rows = [];
-      for (let i = 0; i < ts.length; i++) {
-        const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
-        if ([o, h, l, c].some((v) => v == null || !Number.isFinite(v))) continue;
-        rows.push({ time: ts[i], open: o, high: h, low: l, close: c });
-      }
-      if (rows.length < 10) return null;
-      const price = result.meta?.regularMarketPrice ?? rows[rows.length - 1].close;
-      return { candles: rows.slice(-90), price };
+    function adjustCurrent(delta) {
+      const el = $("current");
+      el.value = Math.round((Number(el.value) || 0) + delta);
+      recalc(false);
+      setLiveStatus(`現在値 ${fmt(el.value)} に更新（API未接続・手動同期）`, "on");
     }
 
-    async function fetchLive(symbol) {
-      const api = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=60m&range=1mo`;
-      const attempts = [
-        api,
-        `https://corsproxy.io/?url=${encodeURIComponent(api)}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(api)}`,
-      ];
-      for (const url of attempts) {
-        try {
-          const res = await fetch(url, { cache: "no-store" });
-          if (!res.ok) continue;
-          const json = await res.json();
-          const result = json?.chart?.result?.[0];
-          if (!result) continue;
-          const parsed = parseYahoo(result);
-          if (parsed) return parsed;
-        } catch (_) {
-          // 次のプロキシへ
-        }
-      }
-      return null;
-    }
-
-    async function liveTick() {
-      if (liveBusy) return;
-      liveBusy = true;
-      const symbol = $("liveSource").value;
-      const label = $("liveSource").selectedOptions?.[0]?.textContent || symbol;
-      setLiveStatus(`ライブ取得中… (${label})`);
-      const data = await fetchLive(symbol);
-      liveBusy = false;
-      if (!data) {
-        setLiveStatus("ライブ価格を取得できませんでした。手動入力値で計算中です。", "error");
-        return;
-      }
-      candles = data.candles;
-      const highs = candles.map((c) => c.high);
-      const lows = candles.map((c) => c.low);
-      $("current").value = Math.round(data.price);
-      $("high").value = Math.round(Math.max(...highs));
-      $("low").value = Math.round(Math.min(...lows));
-      const rsi = computeRSI(candles, 14);
-      if (rsi != null) $("rsi").value = rsi;
+    function autoRecalcTick() {
       recalc(false);
       const now = new Date().toLocaleTimeString("ja-JP");
-      setLiveStatus(`ライブ更新 ${now}（${label} / 60分足・約15分遅延の場合あり）`, "on");
+      setLiveStatus(`自動再計算 ${now}（入力値ベース・API未接続）`, "on");
     }
 
-    function stopLive() {
-      liveOn = false;
-      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-      $("liveToggle").textContent = "ライブ自動更新 開始";
-      $("liveToggle").classList.remove("secondary");
-      $("liveToggle").classList.add("primary");
+    function stopAutoRecalc() {
+      autoOn = false;
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      $("autoRecalcToggle").textContent = "自動再計算 開始";
+      $("autoRecalcToggle").classList.remove("secondary");
+      $("autoRecalcToggle").classList.add("primary");
     }
 
-    function startLive() {
-      liveOn = true;
-      $("liveToggle").textContent = "ライブ自動更新 停止";
-      $("liveToggle").classList.remove("primary");
-      $("liveToggle").classList.add("secondary");
-      liveTick();
-      const sec = Math.max(15, Number($("liveInterval").value) || 30);
-      liveTimer = setInterval(liveTick, sec * 1000);
+    function startAutoRecalc() {
+      autoOn = true;
+      $("autoRecalcToggle").textContent = "自動再計算 停止";
+      $("autoRecalcToggle").classList.remove("primary");
+      $("autoRecalcToggle").classList.add("secondary");
+      autoRecalcTick();
+      const sec = Math.max(15, Number($("autoRecalcInterval").value) || 30);
+      autoTimer = setInterval(autoRecalcTick, sec * 1000);
     }
 
-    function toggleLive() {
-      if (liveOn) stopLive(); else startLive();
+    function toggleAutoRecalc() {
+      if (autoOn) stopAutoRecalc(); else startAutoRecalc();
     }
 
     function renderTradingView() {
@@ -1461,9 +1443,11 @@
     $("sample").addEventListener("click", () => { seed += 11; recalc(true); });
     $("reloadTv").addEventListener("click", renderTradingView);
     $("tvSymbol").addEventListener("change", renderTradingView);
-    $("liveToggle").addEventListener("click", toggleLive);
-    $("liveSource").addEventListener("change", () => { if (liveOn) liveTick(); });
-    $("liveInterval").addEventListener("change", () => { if (liveOn) { stopLive(); startLive(); } });
+    $("autoRecalcToggle").addEventListener("click", toggleAutoRecalc);
+    $("autoRecalcInterval").addEventListener("change", () => { if (autoOn) { stopAutoRecalc(); startAutoRecalc(); } });
+    document.querySelectorAll(".quick-steps button[data-step]").forEach((btn) => {
+      btn.addEventListener("click", () => adjustCurrent(Number(btn.dataset.step)));
+    });
     $("applyCsv").addEventListener("click", () => {
       const parsed = parseCsv($("ohlc").value);
       if (parsed) {

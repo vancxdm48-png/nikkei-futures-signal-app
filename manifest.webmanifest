@@ -1,6 +1,6 @@
 {
   "name": "Nikkei 225 Futures 売買判断支援",
-  "short_name": "N225 シグナル",
+  "short_name": "Nikkei 225",
   "description": "日経225先物の売買判断を多要因スコア・信頼度・リスクリワードで支援するツール（投資助言ではありません）。",
   "lang": "ja",
   "start_url": ".",
